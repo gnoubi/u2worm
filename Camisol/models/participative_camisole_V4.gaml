@@ -6,9 +6,16 @@ model participativecamisole
 
 import "camisole_adapter_V2.gaml" as SoilModel
 
+/*
+ * 
+ * todo : ajouter un bouton pour déclencher l'envoi manuellement
+ * 
+ */
+
+
 global
 {
-	
+	string name_player;
 	int end_cycle <- 500;
 	int nb_cycle <- 500;
 	int sub_simulation_cycle <- 0;
@@ -26,8 +33,24 @@ global
 	float plot_area <- 10#m*10#m;
 	geometry area_result <- polygon([point(1#cm,5#cm),point(9#cm,5#cm),point(9#cm,9#cm),point(1#cm,9#cm),point(1#cm,5#cm) ]);
 	
-	csv_file history_file_csv <- csv_file("../includes/history_file.csv");
+	csv_file history_file_csv <- csv_file("../player_file/history_file.csv");
 	matrix history_file_matrix <- matrix(history_file_csv);
+	
+	list<string> best_combination;
+	
+	init{
+		name_player <- user_input("Enter your name",["name" :: ""])["name"];	
+		
+		create network_species {
+			do connect to: "localhost" protocol: "tcp_client" port: 3001 with_name: "Client";
+			
+			ask history_file
+			{
+				best_combination <- get_best_combination();
+			}
+			do send to: "Server" contents: best_combination;
+		}
+	}
 	
 	action valid_button
 	{
@@ -181,8 +204,9 @@ global
 	    sub_simulation_cycle <- sub_simulation_cycle +1;
    }
    
-   reflex compute_result when: sub_simulation_cycle = end_cycle
+   reflex compute_result when: sub_simulation_cycle = end_cycle-1
    {
+   		write("sub_simulation_cycle "+sub_simulation_cycle +" // end_cycle "+end_cycle);
 		do update_model;
   		do display_log;
   		do compute_charette;
@@ -222,8 +246,10 @@ global
 	
 	action write_history_in_file
 	{
-		save [current_soil, current_landuse,current_compost, SoilModel.Simple[0].get_production_total(), nb_charette_total, end_cycle, seed] 
-		rewrite: false to: "../includes/history_file.csv" type: "csv";
+		write("write_history_in_file "+name_player);
+		save [current_soil, current_landuse,current_compost, SoilModel.Simple[0].get_production_total(), nb_charette_total, end_cycle, seed, name_player] 
+		rewrite: false to: "../player_file/history_file.csv" type: "csv";
+		
 	}
 
 	init
@@ -489,6 +515,15 @@ grid history width:5 height:1 schedules:[] {
 
 grid history_file width:history_file_matrix.rows height:2 {
 	
+	matrix matrix_file <- history_file_matrix;
+	int best_row;
+	
+	
+	init{
+		matrix_file <- history_file_matrix;
+		best_row <- 3;
+	}
+	
 	string get_link_to_image(string name_image)
 	{
 		return "../includes/buttons/"+name_image+".png";
@@ -496,24 +531,51 @@ grid history_file width:history_file_matrix.rows height:2 {
 	
 	string get_production_for_row(int row)
 	{
-		return history_file_matrix[3,row];
+		return matrix_file[3,row];
+	}
+	
+	string get_name_of_player(int row)
+	{
+		return matrix_file[7,row];
 	}
 	
 	action draw_history(int row)
 	{
-		draw image_file(get_link_to_image(history_file_matrix[0,row])) size:self.shape.width at: point((row*self.shape.width),self.shape.height);
-		draw image_file(get_link_to_image(history_file_matrix[1,row])) size:self.shape.width/2 at: point((row*self.shape.width),self.shape.height);
-		draw image_file(get_link_to_image(history_file_matrix[2,row])) size:self.shape.width/3 at: point((row*self.shape.width-self.shape.width/6),self.shape.height);
+		if(get_production_for_row(row) > get_production_for_row(best_row))
+		{
+			write("CHANGE IN BEsT ROW");
+			best_row <- row;
+		}
+		
+		draw image_file(get_link_to_image(matrix_file[0,row])) size:self.shape.width at: point((row*self.shape.width),self.shape.height);
+		draw image_file(get_link_to_image(matrix_file[1,row])) size:self.shape.width/2 at: point((row*self.shape.width),self.shape.height);
+		draw image_file(get_link_to_image(matrix_file[2,row])) size:self.shape.width/3 at: point((row*self.shape.width-self.shape.width/6),self.shape.height);
 		draw ""+get_production_for_row(row) size:5 color:#black at:point((row*self.shape.width),self.shape.height*1.2);		
+		draw ""+get_name_of_player(row) size:5 color:#black at:point((row*self.shape.width),self.shape.height*1.4);	
+	}
+	
+	list<string> get_best_combination
+	{
+		string sol <- matrix_file[0,best_row];
+		string production <- matrix_file[1,best_row];
+		string compost <- matrix_file[2,best_row];
+		string production_in_kilo <- get_production_for_row(best_row);
+		
+		return [name_player, sol, production, compost, production_in_kilo];
 	}
 	
 	aspect base
 	{
-		loop row from: 1 to: history_file_matrix.rows - 1
+		loop row from: 1 to: matrix_file.rows - 1
 		{
 			do draw_history(row);	
 		}
 	}
+}
+
+species network_species skills:[network]
+{
+	
 }
 
 experiment run
